@@ -570,4 +570,210 @@ public class CameraViewResultActivity extends Activity implements CvCameraViewLi
 		// return final image
 		return bmOut;
 	}	
+	
+	public String countFunction(String countObjName) {
+		Bitmap i = getBitmap(imgPath + "orignal.jpg");
+		
+		Bitmap bmpImg = i.copy(Bitmap.Config.ARGB_8888, false);
+		bmpImg =SetBrightness(bmpImg,-70);
+		//Log.i("after Bitmap bmpImg",""+imgPath);
+		Mat srcMat = new Mat ( bmpImg.getHeight(), bmpImg.getWidth(), CvType.CV_8UC3);
+		Bitmap myBitmap32 = bmpImg.copy(Bitmap.Config.ARGB_8888, true);
+		Utils.bitmapToMat(bmpImg, srcMat);
+	
+		Mat dst = new Mat();
+		
+		// new dhara
+		Imgproc.cvtColor(srcMat, dst, Imgproc.COLOR_RGB2HSV);
+		ArrayList<Mat> channels = new ArrayList<Mat>();
+		Core.split(srcMat, channels);
+		Mat satImg = channels.get(0);
+		
+		Imgproc.medianBlur(satImg , satImg , 11);
+		Highgui.imwrite(imgPath + "blurred.jpg", satImg);
+		
+		Imgproc.threshold(satImg, satImg, -1, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
+		Highgui.imwrite(imgPath + "satImg_thresh.jpg", satImg);
+		
+		Imgproc.GaussianBlur(satImg, satImg, new Size(), 2);
+		Highgui.imwrite(imgPath + "gaussian.jpg", satImg);
+		
+		Mat threshMat = new Mat(satImg.rows(), satImg.cols(), CvType.CV_8UC1);
+
+		//Imgproc.threshold(dst, dst, -1, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
+		Imgproc.adaptiveBilateralFilter(satImg, threshMat, new Size(1, 1),1.0);
+		Highgui.imwrite(imgPath + "bilateral_filter.jpg", threshMat);
+		
+		/*Imgproc.adaptiveThreshold(threshMat, threshMat, 255, Imgproc.ADAPTIVE_THRESH_MEAN_C, Imgproc.THRESH_BINARY, 3, 1);
+		Highgui.imwrite(imgPath + "adaptive_threshold.jpg", threshMat);*/
+		
+		Imgproc.threshold(threshMat, threshMat, -1, 255, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU);
+		Highgui.imwrite(imgPath + "threshold.jpg", threshMat);
+		
+		Core.bitwise_not(threshMat, threshMat);
+		Highgui.imwrite(imgPath + "not.jpg", dst);
+		
+		/*Core.bitwise_xor(srcMat, dst, dst);
+		Highgui.imwrite(imgPath + "xored.jpg", dst);*/
+		
+		Imgproc.dilate(threshMat, threshMat, Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, new Size(16, 16)));
+		Highgui.imwrite(imgPath + "dilated.jpg", threshMat);
+		
+		// canny edge detection
+		// here
+		Mat edge = new Mat();
+		Imgproc.Canny(satImg, edge, 35,90); // 40,120 -> to try
+		
+		Log.e(TAG,"edge: "  + edge.cols());
+		
+		edge.convertTo(threshMat,CvType.CV_8U);
+		
+		Log.e(TAG,"dst cols " + threshMat.cols());
+ 
+		Highgui.imwrite(imgPath + "canny.jpg", threshMat);
+		
+		Imgproc.dilate(threshMat, threshMat, Imgproc.getStructuringElement(Imgproc.MORPH_ELLIPSE, new Size(16, 16)));
+		Highgui.imwrite(imgPath + "dilated1.jpg", threshMat);
+		
+		// flood fill
+		/*Mat matMask = new Mat(dst.rows() + 2, dst.cols() + 2, CvType.CV_8UC1, new Scalar(255));
+		
+		for(int ii=0;ii<dst.rows();ii++) {
+            for(int j=0;j<dst.cols();j++) {
+            	Log.e(TAG,"dst.get(ii, j) : " + dst.get(ii, j).length);
+                double checker = dst.get(ii, j)[0];
+                
+                Log.e(TAG,"checker : " + checker);
+                
+                if(checker == 255) {
+                    Imgproc.floodFill(dst, matMask, new Point(j,ii), new Scalar(255), null,new Scalar(255), new Scalar(255), 8);
+                }
+            }
+        }
+		
+		Highgui.imwrite(imgPath + "flooded.jpg", dst);*/
+		
+		List<MatOfPoint> contours = new ArrayList<MatOfPoint>();
+		Mat hierarchy = new Mat(threshMat.rows(), threshMat.cols(),CvType.CV_8UC1);
+		Imgproc.findContours(threshMat, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+		
+		Log.e(TAG,"contours : " + contours.size());
+		int counter = 0;
+		
+		// get the moments of the contours
+		
+		for (int idx = 0; idx < contours.size(); idx++) {
+			MatOfPoint  matOfPoint = new MatOfPoint(contours.get(idx));
+			
+			double[] values = hierarchy.get(idx, 0);
+			double[] secondLevelValues = hierarchy.get(idx, 1);
+			if(values != null) {
+				Log.e(TAG,"dst : 0 " + values[0]);
+				if(values[0] != -1) {
+					if(matOfPoint.total() >= 5) {
+						Log.e(TAG,"is convex inside first loop : " + Imgproc.isContourConvex(matOfPoint));
+						counter ++;
+					}
+					
+					/*Moments moments = Imgproc.moments(matOfPoint);
+					moments.get_m01();*/
+					Imgproc.drawContours(threshMat, contours, idx, new Scalar(255), -1,8,hierarchy,0,new Point());
+				}
+			}else {
+				if(secondLevelValues != null) {
+					Log.e(TAG,"dst : 1 " + secondLevelValues[0]);
+					if(secondLevelValues[0] != -1) {
+						if(matOfPoint.total() >= 5) {
+							counter ++;
+							Log.e(TAG,"is convex inside first loop : " + Imgproc.isContourConvex(matOfPoint));
+						}
+						Imgproc.drawContours(threshMat, contours, idx, new Scalar(255), -1,8,hierarchy,0,new Point());
+					}
+				}
+			}
+		}
+		
+		Highgui.imwrite(imgPath + "flooded2.jpg", threshMat);
+		
+		//Utils.matToBitmap(dst, bmpImg);
+		
+		//BlobDetection blob = new BlobDetection(bmpImg);
+		//Bitmap anotherBitmap = blob.getBlob(bmpImg);
+		
+		//Mat newMat = new Mat();
+		
+		//Utils.bitmapToMat(anotherBitmap, newMat);
+		//Highgui.imwrite(imgPath + "newMat.jpg", newMat);
+		
+		//List<MatOfPoint> contours = new ArrayList<MatOfPoint>();
+		//Imgproc.findContours(dst, contours, dst, Imgproc.RETR_LIST, Imgproc.CHAIN_APPROX_SIMPLE);
+
+		List<RotatedRect> lstRotatedRects = new ArrayList<RotatedRect>();
+		int ellipseCounter = 0;
+		
+		// fit ellipses
+		for (int idx = 0; idx < contours.size(); idx++) {
+
+			MatOfPoint  matOfPoint = new MatOfPoint(contours.get(idx));
+			MatOfPoint2f matOfPoint2f = new MatOfPoint2f(matOfPoint.toArray());
+
+			/*for (int j=0; j<dst.rows(); j++) {
+				for (int k=0; k<dst.cols(); k++)
+				{
+					//				contourOuter, Point2f(k,j),false
+					if ( Imgproc.pointPolygonTest(matOfPoint2f, 
+							new Point((double)k,(double) j), false) == 0){
+						//dst.get(j, i)=255;
+
+						double[] data = dst.get(j,k);
+						for(int l = 0 ;l<data.length;l++) {
+							data[l] = 125;
+						}
+
+						dst.put(j, k, data);
+
+					}else {
+						double[] data = dst.get(j,k);
+						for(int l = 0 ;l<data.length;l++) {
+							data[l] = 80;
+						}
+
+						dst.put(j, k, data);
+					}
+				}
+			}
+			 Imgproc.drawContours(dst,contours,idx,new Scalar(255),8);*/
+			if(matOfPoint.total() >= 5) {
+				Log.e(TAG," : " + matOfPoint.total());
+				Log.e(TAG," Imgproc.contourArea(matOfPoint) : " + Imgproc.contourArea(matOfPoint));
+				Log.e(TAG," is convex : " + Imgproc.isContourConvex(matOfPoint));
+				//if(Imgproc.isContourConvex(contours.get(idx))) {
+					Log.e(TAG,"Imgproc.contourArea(matOfPoint) : " + Imgproc.contourArea(matOfPoint) );
+					if(String.valueOf((int)Imgproc.contourArea(matOfPoint)).length() >= 4) {
+						lstRotatedRects.add(Imgproc.fitEllipse(matOfPoint2f));
+						ellipseCounter ++;
+						Core.ellipse( threshMat,Imgproc.fitEllipse(matOfPoint2f), new Scalar(255), -1, 8 );
+						
+						Highgui.imwrite(imgPath + "ellipsed_" + ellipseCounter + ".jpg", threshMat);
+					}
+				//}
+			}
+		}
+		
+		//Utils.matToBitmap(dst, bmpImg);
+		Highgui.imwrite(imgPath + "ellipsed.jpg", threshMat);
+		
+		//Toast.makeText(this, "now going to draw ellipse", 3000).show();
+		
+		/*BitmapDrawable bitmapDrawable = new BitmapDrawable(anotherBitmap);
+		imageViewShower.setBackgroundDrawable(bitmapDrawable);
+		textViewInfo.setText("Found "+blob.blobList.size()+" blobs:\n");*/
+		//System.out.printf("Found %d blobs:\n", blob.blobList.size());
+		//for (BlobDetection.Blob blobies : blob.blobList)  {
+			//System.out.println(blobies);
+			//textViewInfo.setText(textViewInfo.getText() +" " +  blobies+"\n");
+		//}
+		
+		return String.valueOf(contours.size()) + " " + String.valueOf(ellipseCounter);//blob.blobList.size());
+	}
 }
